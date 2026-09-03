@@ -610,7 +610,9 @@
       "safety": "Safety",
       "commit": "Commit"
     },
-    "summary": { "total": "checkpoints" },
+    "summary": {
+      "total": "checkpoints"
+    },
     "snapshotDialog": {
       "title": "Create snapshot",
       "session": "Session",
@@ -2201,7 +2203,24 @@
     "modalityFile": "File",
     "modalityText": "Text only",
     "perMillionIn": "/1M in",
-    "perMillionOut": "/1M out"
+    "perMillionOut": "/1M out",
+    "quickAddModel": "Quick Add",
+    "quickAddModelHint": "Add a model with one click",
+    "quickAddModelIdPlaceholder": "e.g. gpt-4o-mini",
+    "quickAddModelNamePlaceholder": "e.g. GPT-4o Mini (optional)",
+    "quickAddModelSuccess": "Model \"{{name}}\" added",
+    "quickAddModelFailed": "Failed to add model",
+    "quickAddModelExists": "Model \"{{id}}\" already exists",
+    "quickAdd": "Quick Add",
+    "quickAddTitle": "Quick Add Model",
+    "quickAddSelectProvider": "Select Provider",
+    "quickAddNoProvider": "Configure a provider first to add models",
+    "quickAddModelId": "Model ID",
+    "quickAddModelName": "Display Name (optional)",
+    "quickAddAddModel": "Add Model",
+    "quickAddSaved": "Model \"{{name}}\" added",
+    "quickAddFailed": "Failed to add model",
+    "quickAddExists": "Model \"{{id}}\" already exists"
   },
   "files": {
     "title": "Files",

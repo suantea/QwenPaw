@@ -27,6 +27,7 @@ import {
   groupProviders,
 } from "./utils";
 import { ProviderIcon } from "./components/ProviderIconComponent";
+import { QuickAddModelModal } from "./components/modals/QuickAddModelModal";
 import styles from "./index.module.less";
 
 /* ------------------------------------------------------------------ */
@@ -55,6 +56,7 @@ function ModelsPage() {
     providers: ProviderInfo[];
   } | null>(null);
   const [llmModalOpen, setLlmModalOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"cloud" | "local">(() => {
     const stored = localStorage.getItem("models_tab");
     return stored === "local" ? "local" : "cloud";
@@ -538,6 +540,12 @@ function ModelsPage() {
             <CustomProviderModal
               open={addProviderOpen}
               onClose={() => setAddProviderOpen(false)}
+              onSaved={fetchAll}
+            />
+            <QuickAddModelModal
+              open={quickAddOpen}
+              providers={providers}
+              onClose={() => setQuickAddOpen(false)}
               onSaved={fetchAll}
             />
 
