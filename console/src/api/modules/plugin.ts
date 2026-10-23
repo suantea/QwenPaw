@@ -1,3 +1,4 @@
+import { notifyPluginChange } from "../../utils/pluginChangeEvents";
 import { getApiUrl } from "../config";
 import { buildAuthHeaders } from "../authHeaders";
 
@@ -9,6 +10,8 @@ export type PluginType =
   | "command"
   | "frontend"
   | "channel"
+  | "memory"
+  | "hub"
   | "app"
   | "general";
 
@@ -64,6 +67,12 @@ export interface OfficialPluginCatalogEntry {
   installed: boolean;
   installed_version?: string;
   upgrade_available: boolean;
+}
+
+export interface PluginUpdateInfo {
+  version: string;
+  source: string;
+  name: string;
 }
 
 export interface OfficialPluginCatalog {
@@ -124,7 +133,9 @@ export async function installPlugin(
     throw new Error(body.detail ?? `Install failed (${response.status})`);
   }
 
-  return response.json();
+  const result = await response.json();
+  notifyPluginChange();
+  return result;
 }
 
 /**
@@ -145,7 +156,9 @@ export async function uploadPlugin(file: File): Promise<InstallPluginResult> {
     throw new Error(body.detail ?? `Upload failed (${response.status})`);
   }
 
-  return response.json();
+  const result = await response.json();
+  notifyPluginChange();
+  return result;
 }
 
 /**
@@ -161,6 +174,7 @@ export async function uninstallPlugin(pluginId: string): Promise<void> {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail ?? `Uninstall failed (${response.status})`);
   }
+  notifyPluginChange();
 }
 
 /**

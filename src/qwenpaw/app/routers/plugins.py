@@ -14,12 +14,14 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ...market.registry import MarketProviderBusyError
 from ..utils import schedule_agent_reload
 
 logger = logging.getLogger(__name__)
@@ -36,14 +38,9 @@ def _log_safe(value: object) -> str:
 
 
 def _list_plugins_from_disk() -> list[dict]:
-    """Read plugin manifests directly from the plugins directory on disk.
-
-    Used as a fallback when the plugin loader has not finished
-    initialising (e.g. the frontend opens before the backend startup
-    coroutine completes).  Returns the same shape as the normal list
-    endpoint so the frontend does not need to handle a different schema.
-    """
+    """List installed plugins, including those that could not be loaded."""
     from ...config.utils import get_plugins_dir
+    from ...plugins.architecture import PluginManifest
 
     plugins_dir: Path = get_plugins_dir()
     if not plugins_dir.exists():
@@ -62,29 +59,22 @@ def _list_plugins_from_disk() -> list[dict]:
             continue
         try:
             with open(manifest_path, encoding="utf-8") as f:
-                manifest = json.load(f)
+                manifest = PluginManifest.from_dict(json.load(f))
         except Exception as exc:
             logger.warning("Failed to read %s: %s", manifest_path, exc)
             continue
 
-        plugin_id = manifest.get("id", item.name)
-        frontend_entry = manifest.get("entry", {}).get("frontend")
-
-        from ...plugins.architecture import PluginManifest
-
-        disk_manifest = PluginManifest.from_dict(manifest)
-
         result.append(
             {
-                "id": plugin_id,
-                "name": manifest.get("name", plugin_id),
-                "version": manifest.get("version", "0.0.0"),
-                "description": manifest.get("description", ""),
-                "author": manifest.get("author", ""),
+                "id": manifest.id,
+                "name": manifest.name,
+                "version": manifest.version,
+                "description": manifest.description,
+                "author": manifest.author,
                 "enabled": True,
                 "loaded": False,
-                "plugin_type": disk_manifest.plugin_type,
-                "frontend_entry": frontend_entry,
+                "plugin_type": manifest.plugin_type,
+                "frontend_entry": manifest.entry.frontend,
             },
         )
     return result
@@ -171,7 +161,7 @@ async def _post_load_setup(  # pylint: disable=too-many-branches
             if reg.plugin_id != plugin_id:
                 continue
             try:
-                provider_manager.register_plugin_provider(
+                await provider_manager.register_plugin_provider_async(
                     provider_id=pid,
                     provider_class=reg.provider_class,
                     label=reg.label,
@@ -336,11 +326,13 @@ def _remove_named_tools_from_agents(
                     save_agent_config(agent_id, agent_cfg)
             except Exception as exc:
                 logger.warning(
-                    f"Failed to remove tools from agent '{agent_id}': {exc}",
+                    "Failed to remove tools from agent "
+                    f"'{_log_safe(agent_id)}': {_log_safe(exc)}",
                 )
     except Exception as exc:
         logger.warning(
-            f"Tool removal from agents skipped for '{plugin_id}': {exc}",
+            "Tool removal from agents skipped for "
+            f"'{_log_safe(plugin_id)}': {_log_safe(exc)}",
         )
 
 
@@ -475,6 +467,9 @@ async def _load_plugin_with_optional_force_reinstall(
     source_path: Path,
     *,
     force: bool,
+    reload_agents: bool = True,
+    pawport_owner: dict | None = None,
+    recover_incomplete: bool = False,
 ):
     """Load a plugin, optionally unloading first under one lifecycle lock.
 
@@ -491,7 +486,6 @@ async def _load_plugin_with_optional_force_reinstall(
     """
     from ...config.utils import get_plugins_dir
 
-    install_dir = get_plugins_dir()
     collected: dict = {
         "provider_ids": [],
         "command_names": [],
@@ -530,15 +524,18 @@ async def _load_plugin_with_optional_force_reinstall(
             record,
             force=force,
             old_tools=collected["old_tools"],
+            reload_agents=reload_agents,
         )
 
     return await loader.load_plugin_from_path(
         source_path=source_path,
-        install_dir=install_dir,
+        install_dir=get_plugins_dir(),
         force=force,
         before_force_unload=_before_force_unload if force else None,
         after_force_unload=_after_force_unload if force else None,
         after_load=_after_load,
+        pawport_owner=pawport_owner,
+        recover_incomplete=recover_incomplete,
     )
 
 
@@ -548,6 +545,7 @@ async def _finish_plugin_install_after_load(
     *,
     force: bool,
     old_tools: set,
+    reload_agents: bool = True,
 ) -> None:
     """Post-load setup with force-reinstall tool cleanup before reload.
 
@@ -568,7 +566,8 @@ async def _finish_plugin_install_after_load(
                 record.manifest.id,
                 removed_tools,
             )
-    await _schedule_all_agents_reload(request)
+    if reload_agents:
+        await _schedule_all_agents_reload(request)
 
 
 def _extract_plugin_zip_bytes(content: bytes, temp_dir: Path) -> Path:
@@ -594,42 +593,34 @@ def _extract_downloaded_plugin_zip(zip_path: Path, temp_dir: Path) -> Path:
 
 @router.get(
     "",
-    summary="List loaded plugins",
-    description="Return all loaded plugins with optional UI metadata.",
+    summary="List installed plugins",
+    description="Return installed plugins with their runtime state.",
 )
 async def list_plugins(request: Request):
-    """Return every loaded plugin with basic metadata and entry points.
-
-    If the plugin loader has not yet finished initialising (backend
-    still starting up when the frontend first requests the list), the
-    response is built by scanning the plugins directory on disk.
-    """
+    """Keep failed installations visible and removable in the installed UI."""
     loader = getattr(request.app.state, "plugin_loader", None)
-
+    result = {
+        item["id"]: item
+        for item in await asyncio.to_thread(_list_plugins_from_disk)
+    }
     if loader is None:
-        logger.debug(
-            "[plugins] plugin_loader not ready, falling back to disk scan",
-        )
-        return _list_plugins_from_disk()
+        return list(result.values())
 
-    result = []
     for _plugin_id, record in loader.get_all_loaded_plugins().items():
         manifest = record.manifest
-        result.append(
-            {
-                "id": manifest.id,
-                "name": manifest.name,
-                "version": manifest.version,
-                "description": manifest.description,
-                "author": manifest.author,
-                "enabled": record.enabled,
-                "loaded": True,
-                "plugin_type": manifest.plugin_type,
-                "frontend_entry": manifest.entry.frontend,
-            },
-        )
+        result[manifest.id] = {
+            "id": manifest.id,
+            "name": manifest.name,
+            "version": manifest.version,
+            "description": manifest.description,
+            "author": manifest.author,
+            "enabled": record.enabled,
+            "loaded": record.enabled,
+            "plugin_type": manifest.plugin_type,
+            "frontend_entry": manifest.entry.frontend,
+        }
 
-    return result
+    return list(result.values())
 
 
 @router.get(
@@ -654,6 +645,102 @@ class InstallPluginRequest(BaseModel):
     force: bool = False
 
 
+async def install_plugin_source(
+    source: str,
+    *,
+    app,
+    force: bool = False,
+    reload_agents: bool = True,
+    pawport_owner: dict | None = None,
+    recover_incomplete: bool = False,
+):
+    """Install through the native plugin lifecycle used by the HTTP route."""
+    request = SimpleNamespace(app=app)
+    loader = getattr(app.state, "plugin_loader", None)
+    if loader is None:
+        raise RuntimeError("Plugin loader is not ready yet.")
+
+    normalized = str(source or "").strip()
+    temp_dir: Optional[Path] = None
+    try:
+        if normalized.startswith(("http://", "https://")):
+            temp_dir = Path(await asyncio.to_thread(tempfile.mkdtemp))
+            zip_path = temp_dir / "plugin.zip"
+            logger.info("Downloading plugin from %s", _log_safe(normalized))
+            await _async_download(normalized, zip_path)
+            source_path = await asyncio.to_thread(
+                _extract_downloaded_plugin_zip,
+                zip_path,
+                temp_dir,
+            )
+        else:
+            source_path = await asyncio.to_thread(Path(normalized).resolve)
+            if not await asyncio.to_thread(source_path.exists):
+                raise FileNotFoundError(f"Path not found: {normalized}")
+        return await _load_plugin_with_optional_force_reinstall(
+            loader,
+            request,
+            source_path,
+            force=force,
+            reload_agents=reload_agents,
+            pawport_owner=pawport_owner,
+            recover_incomplete=recover_incomplete,
+        )
+    finally:
+        if temp_dir is not None:
+            await asyncio.to_thread(shutil.rmtree, temp_dir, True)
+
+
+async def uninstall_plugin_source(
+    plugin_id: str,
+    *,
+    app,
+    reload_agents: bool = True,
+) -> None:
+    """Uninstall through the native plugin lifecycle."""
+    request = SimpleNamespace(app=app)
+    loader = getattr(app.state, "plugin_loader", None)
+    if loader is None:
+        raise RuntimeError("Plugin loader is not ready yet.")
+    async with loader.plugin_lifecycle(plugin_id):
+        record = loader.get_loaded_plugin(plugin_id)
+        if record is None:
+            # Failed loads have no runtime record, but their files still
+            # belong to the installed inventory. Use discovery, not a path
+            # constructed from the request's plugin ID.
+            discovered = await asyncio.to_thread(loader.discover_plugins)
+            installed = next(
+                ((m, p) for m, p in discovered if m.id == plugin_id),
+                None,
+            )
+            if installed is None:
+                raise KeyError(f"Plugin '{plugin_id}' is not loaded.")
+            _, source_path = installed
+            await asyncio.to_thread(shutil.rmtree, source_path)
+            # A failed plugin's manifest cannot establish tool ownership.
+            # Preserve agent configs, including those from earlier runs.
+            return
+        meta = record.manifest.meta or {}
+        provider_ids, command_names = _collect_plugin_runtime_ids(
+            loader.registry,
+            plugin_id,
+        )
+        await loader.unload_plugin(plugin_id, delete_files=True)
+        _post_unload_cleanup(
+            request,
+            plugin_id,
+            provider_ids,
+            command_names,
+        )
+        await asyncio.to_thread(
+            _remove_plugin_tools_from_agents,
+            plugin_id,
+            meta,
+        )
+        if reload_agents:
+            await _schedule_all_agents_reload(request)
+
+
 @router.post(
     "/install",
     summary="Install plugin from path or URL",
@@ -673,47 +760,23 @@ async def install_plugin(
     reloaded in the background so that newly registered tools can be
     used without a server restart.
     """
-    loader = getattr(request.app.state, "plugin_loader", None)
-    if loader is None:
+    if getattr(request.app.state, "plugin_loader", None) is None:
         raise HTTPException(
             status_code=503,
             detail="Plugin loader is not ready yet. Try again shortly.",
         )
 
-    source = body.source.strip()
-    is_url = source.startswith(("http://", "https://"))
-    temp_dir: Optional[Path] = None
-
     try:
-        if is_url:
-            # Download and extract the zip archive
-            temp_dir = Path(await asyncio.to_thread(tempfile.mkdtemp))
-            zip_path = temp_dir / "plugin.zip"
-            logger.info(f"Downloading plugin from {_log_safe(source)}")
-            await _async_download(source, zip_path)
-            source_path = await asyncio.to_thread(
-                _extract_downloaded_plugin_zip,
-                zip_path,
-                temp_dir,
-            )
-        else:
-            source_path = await asyncio.to_thread(Path(source).resolve)
-            if not await asyncio.to_thread(source_path.exists):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Path not found: {source}",
-                )
-
-        # Load + post-load setup share one lifecycle lock.
-        record = await _load_plugin_with_optional_force_reinstall(
-            loader,
-            request,
-            source_path,
+        record = await install_plugin_source(
+            body.source,
+            app=request.app,
             force=body.force,
         )
     except HTTPException:
         raise
     except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MarketProviderBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -723,10 +786,6 @@ async def install_plugin(
             status_code=500,
             detail=f"Plugin installation failed: {exc}",
         ) from exc
-    finally:
-        if temp_dir is not None and await asyncio.to_thread(temp_dir.exists):
-            await asyncio.to_thread(shutil.rmtree, temp_dir, True)
-
     return {
         "id": record.manifest.id,
         "name": record.manifest.name,
@@ -789,6 +848,8 @@ async def upload_plugin(
         raise
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MarketProviderBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -832,35 +893,15 @@ async def uninstall_plugin(plugin_id: str, request: Request):
             detail="Plugin loader is not ready yet.",
         )
 
-    # Full uninstall transaction under one lifecycle lock so record/meta
-    # capture, unload, and agent-config cleanup cannot race a concurrent
-    # reinstall of the same id (stale meta must not delete the wrong tools).
     try:
-        async with loader.plugin_lifecycle(plugin_id):
-            record = loader.get_loaded_plugin(plugin_id)
-            if record is None:
-                raise KeyError(f"Plugin '{plugin_id}' is not loaded.")
-            meta: dict = record.manifest.meta or {}
-
-            provider_ids, command_names = _collect_plugin_runtime_ids(
-                loader.registry,
-                plugin_id,
-            )
-            await loader.unload_plugin(plugin_id, delete_files=True)
-            _post_unload_cleanup(
-                request,
-                plugin_id,
-                provider_ids,
-                command_names,
-            )
-            await asyncio.to_thread(
-                _remove_plugin_tools_from_agents,
-                plugin_id,
-                meta,
-            )
-            await _schedule_all_agents_reload(request)
+        await uninstall_plugin_source(
+            plugin_id,
+            app=request.app,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MarketProviderBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         logger.error(
             f"Plugin uninstall failed for '{_log_safe(plugin_id)}': {exc}",
@@ -999,6 +1040,8 @@ async def search_market_plugins(
     search: Optional[str] = None,
     category: Optional[str] = None,
     sort_by: Optional[str] = None,
+    is_featured: Optional[bool] = None,
+    is_trending: Optional[bool] = None,
 ):
     """Proxy plugin search to AgentScope Platform to avoid CORS."""
     import httpx
@@ -1013,6 +1056,10 @@ async def search_market_plugins(
         params["category"] = category
     if sort_by:
         params["sort_by"] = sort_by
+    if is_featured is not None:
+        params["is_featured"] = is_featured
+    if is_trending is not None:
+        params["is_trending"] = is_trending
 
     try:
         async with httpx.AsyncClient(
