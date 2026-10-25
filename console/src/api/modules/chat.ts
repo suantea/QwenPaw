@@ -4,8 +4,10 @@ import { buildAuthHeaders } from "../authHeaders";
 import type {
   ChatSpec,
   ChatHistory,
+  ChatResolution,
   ChatDeleteResponse,
   ChatUpdateRequest,
+  ChatGroup,
   BatchArchiveResult,
   Session,
 } from "../types";
@@ -17,9 +19,25 @@ export interface ChatUploadResponse {
   stored_name?: string;
 }
 
+export interface ChatStatusResponse {
+  status: "idle" | "running";
+}
+
 const FILES_PREVIEW = "/files/preview";
 
 export const chatApi = {
+  resolveChat: (
+    chatId: string,
+    options?: { currentAgentId?: string; signal?: AbortSignal },
+  ) => {
+    const params = new URLSearchParams({ chat_id: chatId });
+    if (options?.currentAgentId)
+      params.set("current_agent_id", options.currentAgentId);
+    return request<ChatResolution>(`/chats/resolve?${params}`, {
+      signal: options?.signal,
+    });
+  },
+
   /** Upload a file for chat attachment. Returns URL path for content. */
   uploadFile: async (file: File): Promise<ChatUploadResponse> => {
     const formData = new FormData();
@@ -59,14 +77,26 @@ export const chatApi = {
     user_id?: string;
     channel?: string;
     archived?: boolean;
+    include_app_owned?: boolean;
+    agentId?: string;
   }) => {
     const searchParams = new URLSearchParams();
     if (params?.user_id) searchParams.append("user_id", params.user_id);
     if (params?.channel) searchParams.append("channel", params.channel);
     if (params?.archived !== undefined)
       searchParams.append("archived", String(params.archived));
+    if (params?.include_app_owned !== undefined)
+      searchParams.append(
+        "include_app_owned",
+        String(params.include_app_owned),
+      );
     const query = searchParams.toString();
-    return request<ChatSpec[]>(`/chats${query ? `?${query}` : ""}`);
+    const path = `/chats${query ? `?${query}` : ""}`;
+    return params?.agentId
+      ? request<ChatSpec[]>(path, {
+          headers: { "X-Agent-Id": params.agentId },
+        })
+      : request<ChatSpec[]>(path);
   },
 
   createChat: (chat: Partial<ChatSpec>) =>
@@ -75,10 +105,39 @@ export const chatApi = {
       body: JSON.stringify(chat),
     }),
 
-  getChat: (chatId: string, options?: { signal?: AbortSignal }) =>
-    request<ChatHistory>(`/chats/${encodeURIComponent(chatId)}`, {
-      signal: options?.signal,
-    }),
+  getChat: (
+    chatId: string,
+    options?: { signal?: AbortSignal; include_app_owned?: boolean },
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (options?.include_app_owned !== undefined)
+      searchParams.append(
+        "include_app_owned",
+        String(options.include_app_owned),
+      );
+    const query = searchParams.toString();
+    return request<ChatHistory>(
+      `/chats/${encodeURIComponent(chatId)}${query ? `?${query}` : ""}`,
+      {
+        signal: options?.signal,
+      },
+    );
+  },
+
+  getChatStatus: (
+    chatId: string,
+    options?: { signal?: AbortSignal; agentId?: string },
+  ) => {
+    return request<ChatStatusResponse>(
+      `/chats/${encodeURIComponent(chatId)}/status`,
+      {
+        signal: options?.signal,
+        headers: options?.agentId
+          ? { "X-Agent-Id": options.agentId }
+          : undefined,
+      },
+    );
+  },
 
   updateChat: (chatId: string, chat: ChatUpdateRequest) =>
     request<ChatSpec>(`/chats/${encodeURIComponent(chatId)}`, {
@@ -122,9 +181,36 @@ export const chatApi = {
       body: JSON.stringify({ chat_ids: chatIds }),
     }),
 
-  stopChat: (chatId: string) =>
+  listGroups: () => request<ChatGroup[]>("/chats/groups"),
+
+  createGroup: (name: string) =>
+    request<ChatGroup>("/chats/groups", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+
+  updateGroup: (groupId: string, update: { name?: string; pinned?: boolean }) =>
+    request<ChatGroup>(`/chats/groups/${encodeURIComponent(groupId)}`, {
+      method: "PUT",
+      body: JSON.stringify(update),
+    }),
+
+  reorderGroups: (groupIds: string[]) =>
+    request<ChatGroup[]>("/chats/groups/order", {
+      method: "PUT",
+      body: JSON.stringify({ group_ids: groupIds }),
+    }),
+
+  deleteGroup: (groupId: string) =>
+    request<{ success: boolean; group_id: string }>(
+      `/chats/groups/${encodeURIComponent(groupId)}`,
+      { method: "DELETE" },
+    ),
+
+  stopChat: (chatId: string, agentId?: string) =>
     request<void>(`/console/chat/stop?chat_id=${encodeURIComponent(chatId)}`, {
       method: "POST",
+      ...(agentId ? { headers: { "X-Agent-Id": agentId } } : {}),
     }),
 };
 

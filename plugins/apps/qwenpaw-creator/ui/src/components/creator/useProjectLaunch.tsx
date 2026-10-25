@@ -223,7 +223,7 @@ async function continueLaunchInBackground({
           project.projectId,
           att.file,
           "NONE",
-          newClientId("asset"),
+          { clientRequestId: newClientId("asset") },
         );
         const taskRefs = accepted.assetVersionId
           ? [`asset-version:${accepted.assetVersionId}`]
@@ -333,17 +333,48 @@ function remoteUrlContentPart(url: string): CreatorContentPart {
  * and the legacy modal composer: draft fields, attachment intake (file /
  * folder / URL), required-model validation and the idempotent launch flow.
  */
-export function useProjectLaunch(options?: { onLaunched?: () => void }) {
+export function useProjectLaunch(options?: {
+  onLaunched?: () => void;
+  initialValues?: {
+    name: string;
+    description: string;
+    scenario: CreatorScenario;
+    contentType: string | null;
+    resolution: string;
+    aspectRatio: string;
+    sourceUrls: string[];
+  };
+}) {
   const { t } = useTranslation();
   const onLaunched = options?.onLaunched;
+  const initialValues = options?.initialValues;
   const router = useRouter();
-  const [projectName, setProjectName] = useState("");
-  const [projectDescription, setProjectDescription] = useState("");
-  const [scenario, setScenario] = useState<CreatorScenario>("short_drama");
-  const [contentType, setContentType] = useState<string | null>(null);
-  const [resolution, setResolution] = useState<"720P" | "1080P">("720P");
-  const [aspectRatio, setAspectRatio] = useState<string>("16:9");
-  const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  const [projectName, setProjectName] = useState(initialValues?.name ?? "");
+  const [projectDescription, setProjectDescription] = useState(
+    initialValues?.description ?? "",
+  );
+  const [scenario, setScenario] = useState<CreatorScenario>(
+    (initialValues?.scenario as CreatorScenario) ?? "short_drama",
+  );
+  const [contentType, setContentType] = useState<string | null>(
+    initialValues?.contentType ?? null,
+  );
+  const [resolution, setResolution] = useState<"720P" | "1080P">(
+    (initialValues?.resolution as "720P" | "1080P") ?? "720P",
+  );
+  const [aspectRatio, setAspectRatio] = useState<string>(
+    initialValues?.aspectRatio ?? "16:9",
+  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null,
+  );
+  const [attachments, setAttachments] = useState<AttachmentDraft[]>(() =>
+    (initialValues?.sourceUrls ?? []).map((url) => ({
+      kind: "url" as const,
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      url,
+    })),
+  );
   const [urlDraft, setUrlDraft] = useState("");
   const [launching, setLaunching] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -357,18 +388,21 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
   const modelConfig = useModelConfigStore((state) => state.config);
   const refreshModelConfig = useModelConfigStore((state) => state.refresh);
   const [modelConfigModalOpen, setModelConfigModalOpen] = useState(false);
+  // Match the server's launch policy: confirmation modes start with script
+  // review, while automatic/YOLO modes need the media models up front.
+  const scriptFirst = modelConfig?.executionAuthorization?.mode !== "allow_all";
   const hasUrl =
     urlDraft.trim().length > 0 || attachments.some((att) => att.kind === "url");
   const hasAttachments = attachments.length > 0 || hasUrl;
   const missingRequiredModels: string[] | null = useMemo(() => {
     if (!modelConfig) return null;
     const config = modelConfig as Partial<ModelConfigData>;
-    const required: ("vlm" | "image" | "video")[] =
-      scenario === "short_drama"
-        ? ["vlm", "image", "video"]
+    const required: ("llm" | "vlm" | "image" | "video")[] =
+      scenario === "short_drama" && !scriptFirst
+        ? ["llm", "vlm", "image", "video"]
         : scenario === "video_edit" || hasAttachments
-        ? ["vlm"]
-        : [];
+        ? ["llm", "vlm"]
+        : ["llm"];
     const missing: string[] = [];
     for (const type of required) {
       const item = config[type];
@@ -379,7 +413,7 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
       if (!ok) missing.push(type);
     }
     return missing;
-  }, [modelConfig, scenario, hasAttachments]);
+  }, [modelConfig, scenario, hasAttachments, scriptFirst]);
   useEffect(() => {
     void refreshModelConfig();
   }, [refreshModelConfig]);
@@ -400,8 +434,10 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
   };
 
   const stopOnOversizedFiles = (files: File[]) => {
-    // 100 * 1024 * 1024: 100MB
-    const oversized = files.filter((file) => file.size > 104857600);
+    // 2 * 1024 * 1024 * 1024: 2GB
+    const oversized = files.filter(
+      (file) => file.size > 2 * 1024 * 1024 * 1024,
+    );
     if (oversized.length > 0) {
       const errorMessage = `${oversized.map((f) => f.name).join("\n")}`;
       Modal.error({
@@ -496,12 +532,15 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
       const resolvedProjectName =
         projectName.trim() || projectNameFromDescription(projectDescription);
       const projectPayload = {
+        // Resolve the stage from the saved permission mode on the server,
+        // so a stale client snapshot cannot override the user's choice.
         name: resolvedProjectName,
         description: projectDescription.trim(),
         scenario,
         resolution,
         aspectRatio,
         contentType: isVideoEdit ? contentType : null,
+        templateId: selectedTemplateId ?? undefined,
         // With no assets, let Project creation persist the first Goal and
         // message atomically.  This avoids an observable IDLE Project between
         // navigation and the follow-up /messages request.
@@ -538,7 +577,7 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
         : committedUrlAttachments;
 
       if (projectPayload.initialGoal) {
-        router.push(`/project/${project.projectId}/plan`);
+        router.push(`/project/${project.projectId}`);
         onLaunched?.();
         projectRequest.current = { signature: "", id: "" };
         initialMessageRequests.current.clear();
@@ -552,7 +591,7 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
       // launch-upload store for the workspace progress card, and sends
       // the durable first message once every ingest settled — so a
       // torn-down composer can no longer strand a Goal-less Project.
-      router.push(`/project/${project.projectId}/plan`);
+      router.push(`/project/${project.projectId}`);
       onLaunched?.();
       projectRequest.current = { signature: "", id: "" };
       initialMessageRequests.current.clear();
@@ -584,6 +623,8 @@ export function useProjectLaunch(options?: { onLaunched?: () => void }) {
     setResolution,
     aspectRatio,
     setAspectRatio,
+    selectedTemplateId,
+    setSelectedTemplateId,
     attachments,
     addFiles,
     addUrl,

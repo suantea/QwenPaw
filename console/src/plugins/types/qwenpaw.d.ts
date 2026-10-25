@@ -105,7 +105,35 @@ export type ChatRequestPayloadTransform = (ctx: {
   selectedAgent: string;
 }) => Record<string, unknown> | void;
 
+/** An assistant fenced block. Identity stays stable as source grows. */
+export interface ChatCodeBlockProps {
+  source: string;
+  language: string;
+  isStreaming: boolean;
+  messageId: string;
+  /** Stable during append-only streaming and Markdown reparsing, not a persistence key. */
+  blockId: string;
+  agentId: string;
+  /** SDK session identity; the host resolves the backend identity on submit. */
+  sessionId: string;
+  fallback: () => React.ReactElement;
+}
+
+export interface ChatSubmitInput {
+  query: string;
+  agentId: string;
+  sessionId: string;
+}
+
 export interface QwenPawChatNamespace {
+  /** Last registration for a language wins; disposing it restores the previous one. */
+  codeBlock(
+    pluginId: string,
+    language: string,
+    component: React.ComponentType<ChatCodeBlockProps>,
+  ): Disposable;
+  /** Resolves on queue admission, not on completion. Never consumes the composer. */
+  submit(pluginId: string, input: ChatSubmitInput): Promise<void>;
   welcome: {
     set(
       pluginId: string,
@@ -265,6 +293,8 @@ export interface QwenPawHostNamespace {
   apiBaseUrl: string;
   getApiUrl(path: string): string;
   getApiToken(): string | null;
+  prepareBrowserSession(appId: string): Promise<number | null>;
+  usesBrowserSession(appId: string): boolean;
 
   // ── Hooks (call only inside plugin-supplied React components) ─────────────
   useTheme(): HostThemeMode;
@@ -275,6 +305,7 @@ export interface QwenPawHostNamespace {
   // ── Imperative getters (safe outside React render) ────────────────────────
   getSelectedAgentId(): string;
   getCurrentSessionId(): string | null;
+  openExternalLink(url: string): void;
 
   /** Auth-aware fetch. Automatically injects `Authorization` and `X-Agent-Id`. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
@@ -282,6 +313,19 @@ export interface QwenPawHostNamespace {
 
 export interface QwenPawAuditNamespace {
   overrides(): OverrideRecord[];
+}
+
+export interface MemoryBackendExtension {
+  id: string;
+  label: string;
+  configPath?: string[];
+  tabKey?: string;
+  ConfigComponent?: React.ComponentType;
+  available?: boolean;
+}
+
+export interface QwenPawMemoryBackendsNamespace {
+  register(pluginId: string, extension: MemoryBackendExtension): Disposable;
 }
 
 export interface PluginRouteDeclaration {
@@ -297,7 +341,11 @@ export interface QwenPawWindowNamespace {
   host: QwenPawHostNamespace;
   chat: QwenPawChatNamespace;
   audit: QwenPawAuditNamespace;
+  memoryBackends: QwenPawMemoryBackendsNamespace;
   modules: Record<string, Record<string, unknown>>;
+  paw?: {
+    forApp(appId: string): import("../pawapp-sdk/types").PawSdk;
+  };
   registerRoutes?(pluginId: string, routes: PluginRouteDeclaration[]): void;
   registerToolRender?(
     pluginId: string,
