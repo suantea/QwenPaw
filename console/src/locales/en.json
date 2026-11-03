@@ -448,6 +448,24 @@
     "backToApp": "Back to app",
     "searchPlaceholder": "Search settings",
     "noResults": "No matching settings",
+    "searchSelectTask": "Choose a task to edit, or create one, to locate this setting.",
+    "searchSelectChannel": "Choose a channel to locate this setting.",
+    "searchSelectObject": "Choose an item and open its settings. Some fields depend on the selected mode.",
+    "searchChooseLoop": "Choose the relevant Loop mode. Some parameters appear after their option is enabled.",
+    "searchConditionalSetting": "Choose the applicable mode or enable the related option to configure this setting.",
+    "mcpJsonConfig": "Advanced JSON configuration",
+    "searchToolAvailability": "Tool availability depends on the agent, installed plugins and current mode.",
+    "searchNativeContextOnly": "Available only for profiles using the legacy Native context strategy.",
+    "searchScrollContextOnly": "Available for the Scroll context strategy.",
+    "searchReMeOnly": "Available when the ReMe Light memory backend is selected.",
+    "searchBuiltinSkillLanguage": "Choose a built-in skill with multiple language versions, then open its details.",
+    "searchBuiltinSkillUpdate": "Choose a built-in skill to configure its automatic updates.",
+    "searchBackupSecrets": "Open a backup creation or restoration form and select the relevant scope to configure secrets.",
+    "searchWhisperProvider": "Select Whisper API as the transcription provider to configure its API provider.",
+    "searchAgentTaskOnly": "This setting is available for agent tasks only.",
+    "searchEnableFallback": "Enable fallback models to configure the fallback list.",
+    "searchUnsupportedChannel": "This channel does not support these access control settings.",
+    "searchUnsupportedBackend": "Model routing is available for QwenPaw agents.",
     "groups": {
       "application": "Application",
       "agentConfiguration": "Agent configuration",
@@ -589,6 +607,8 @@
     "skillBuiltinSyncFailed": "\"{{skill}}\" could not sync to: {{agents}}",
     "requestedBy": "By",
     "markRead": "Mark Read",
+    "unreadOnly": "Unread only",
+    "emptyUnread": "No unread messages match the current filters",
     "markAllRead": "Mark All Read",
     "markAllReadNoUnread": "No unread messages",
     "markAllReadSuccess": "Marked {{count}} messages as read",
@@ -1135,7 +1155,6 @@
     "selectBuiltin": "Builtin",
     "selectNone": "None",
     "noPoolSkills": "No skills available in pool",
-    "addSkillsToAgent": "Add Skills",
     "backend": {
       "column": "Backend",
       "eyebrow": "Agent architecture",
@@ -1548,6 +1567,9 @@
     "updateFailed": "Update failed",
     "broadcastSuccess": "Broadcast completed",
     "broadcastFailed": "Broadcast failed",
+    "downloading": "Downloading…",
+    "cancelling": "Cancelling…",
+    "cancelFailed": "Failed to cancel the download",
     "overwriteConfirm": "Overwrite existing skills?",
     "overwriteTargetsContent": "The following existing targets will be overwritten:",
     "builtinOverwriteTargetsContent": "The following built-in targets have different versions and will be overwritten:",
@@ -1983,6 +2005,10 @@
     "selectAtLeastOneDay": "Select at least one day."
   },
   "channels": {
+    "runtime": {
+      "missing_code": "Plugin not installed"
+    },
+    "qrcodeInstallRequired": "Install the plugin to scan a QR code",
     "manualCredentials": "Manual credentials",
     "deliverySettings": "Delivery options",
     "presentationSettings": "Message presentation",
@@ -2937,6 +2963,23 @@
     "modalityFile": "File",
     "perMillionIn": "/1M in",
     "perMillionOut": "/1M out",
+    "quickAddModel": "Quick Add",
+    "quickAddModelHint": "Add a model with one click",
+    "quickAddModelIdPlaceholder": "e.g. gpt-4o-mini",
+    "quickAddModelNamePlaceholder": "e.g. GPT-4o Mini (optional)",
+    "quickAddModelSuccess": "Model \"{{name}}\" added",
+    "quickAddModelFailed": "Failed to add model",
+    "quickAddModelExists": "Model \"{{id}}\" already exists",
+    "quickAdd": "Quick Add",
+    "quickAddTitle": "Quick Add Model",
+    "quickAddSelectProvider": "Select Provider",
+    "quickAddNoProvider": "Configure a provider first to add models",
+    "quickAddModelId": "Model ID",
+    "quickAddModelName": "Display Name (optional)",
+    "quickAddAddModel": "Add Model",
+    "quickAddSaved": "Model \"{{name}}\" added",
+    "quickAddFailed": "Failed to add model",
+    "quickAddExists": "Model \"{{id}}\" already exists",
     "modelTemplate": "Model template (optional)",
     "modelInfoUnavailable": "Model information is unavailable. You can still add the model.",
     "remoteMissing": "No longer listed remotely",
@@ -3078,6 +3121,22 @@
     "memory": "Long-term Memory",
     "daily": "Daily",
     "digest": "Knowledge Base",
+    "memoryTags": "Memory tags",
+    "memoryTagsLabel": "Tags",
+    "memoryTagBrowse": "Search indexed memories tagged {{tag}}",
+    "memoryTagsAll": "All tags",
+    "memoryTagsScope": "Searches indexed memories. The current file may not be indexed.",
+    "memoryTagsRefresh": "Refresh memory tags",
+    "memoryTagsCount_one": "{{count}} tag",
+    "memoryTagsCount_other": "{{count}} tags",
+    "memoryTagFilesCount_one": "{{count}} file",
+    "memoryTagFilesCount_other": "{{count}} files",
+    "memoryTagsLoadFailed": "Memory tags are unavailable. Please try again.",
+    "memoryTagsEmpty": "No memory tags yet.",
+    "memoryTagFilesEmpty": "No indexed memories carry this tag.",
+    "memoryTagsPrevious": "Previous page",
+    "memoryTagsNext": "Next page",
+    "memoryTagsPage": "{{page}} / {{total}}",
     "memoryGraph": "Memory Graph",
     "memoryGraphShort": "Graph",
     "memoryGraphLoading": "Loading memory graph…",
@@ -4575,6 +4634,7 @@
       "modeTooltip": "Controls how the scanner handles unsafe skills: block, warn only, or disabled",
       "modeBlock": "Block",
       "modeWarn": "Warn Only",
+      "modeOff": "Off",
       "timeout": "Scan Timeout (seconds)",
       "timeoutTooltip": "Maximum time to wait for a scan to complete (5-300 seconds)",
       "saveSuccess": "Skill scanner settings saved",
@@ -5361,17 +5421,28 @@
     "details": "Details"
   },
   "pluginManager": {
-    "busyTitle": "Plugin tasks are running",
-    "busy": {
-      "update": {
-        "warning": "Forcing this update will interrupt running tasks. Unfinished tasks may fail.",
-        "confirm": "Force update",
-        "cancel": "Not now"
-      },
-      "uninstall": {
-        "warning": "Forcing this uninstall will interrupt running tasks. Unfinished tasks may fail.",
-        "confirm": "Force uninstall",
-        "cancel": "Not now"
+    "dependencyUpgrade": {
+      "title": "Confirm shared dependency upgrade",
+      "confirm": "Upgrade and install",
+      "progress": "Updating shared dependencies",
+      "changes": "Shared package changes",
+      "affected": "Affected plugin instances",
+      "noInstances": "No plugin instances are affected.",
+      "restart": "The backend must restart to complete this upgrade. Installation will continue after it reconnects.",
+      "background": "Track in background",
+      "resume": "Tracking was interrupted. Reopen Plugin Manager after the backend reconnects to check the installation.",
+      "invalid": "The dependency upgrade response does not match this installation. Reopen Plugin Manager to check its status.",
+      "notStarted": "The dependency upgrade has not started. Reopen Plugin Manager to review and confirm it again.",
+      "cancelFailed": "The upgrade could not be cancelled. Reopen Plugin Manager to check its status.",
+      "failed": "The shared dependency upgrade failed.",
+      "status": {
+        "needs_confirmation": "Waiting for confirmation",
+        "preparing": "Preparing the upgrade",
+        "applying": "Applying the upgrade",
+        "waiting_restart": "Waiting for the backend to restart",
+        "succeeded": "Installation completed",
+        "failed": "Upgrade failed",
+        "cancelled": "Upgrade cancelled"
       }
     },
     "title": "Plugin Manager",
@@ -5452,7 +5523,20 @@
     "marketSortFavorites": "Most favorited",
     "compatWarningTitle": "Compatibility Warning",
     "compatWarningContent": "This plugin is labeled for QwenPaw {{labels}}. Your QwenPaw version is {{version}}. Installing it may cause errors. Are you sure you want to continue?",
-    "compatWarningConfirm": "Install anyway"
+    "compatWarningConfirm": "Install anyway",
+    "busyTitle": "Plugin tasks are running",
+    "busy": {
+      "update": {
+        "warning": "Forcing this update will interrupt running tasks. Unfinished tasks may fail.",
+        "confirm": "Force update",
+        "cancel": "Not now"
+      },
+      "uninstall": {
+        "warning": "Forcing this uninstall will interrupt running tasks. Unfinished tasks may fail.",
+        "confirm": "Force uninstall",
+        "cancel": "Not now"
+      }
+    }
   },
   "codingMode": {
     "toolPresentationHelp": "When enabled, the agent uses a single code tool. It searches, processes files, and performs other tool operations by writing and running Python code.",
@@ -5752,6 +5836,9 @@
     }
   },
   "preview": {
+    "unavailable": "Preview unavailable",
+    "showDetails": "View details",
+    "hideDetails": "Hide details",
     "error": {
       "SENSITIVE_FILE_BLOCKED": "This file is blocked by File Guard (sensitive file protection).",
       "OUTSIDE_WORKSPACE": "This file is outside the workspace scope. Enable \"Allow Console Preview Outside Workspace\" in Settings → Security → File Guard.",
